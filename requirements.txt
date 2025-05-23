@@ -1,0 +1,9 @@
+django==5.0.4
+postgresql==13.21
+sqlalchemy==1.4.0
+psycopg2==2.9.10
+psycopg2-binary==2.9.9
+python-dotenv==1.1.0
+google-api-python-client 
+google-auth-oauthlib 
+google-auth-httplib2
