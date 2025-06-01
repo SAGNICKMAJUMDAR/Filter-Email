@@ -1,3 +1,4 @@
+from re import split
 from auth_utility import VALID_FIELDS_PREDICATE_MAP, VALID_ACTIONS, CONFLICTING_ACTIONS
 
 class FileValidator:
@@ -21,6 +22,9 @@ class FileValidator:
                   field = rule["field"].lower()
                   predicate = rule["predicate"].lower()
                   value = rule["value"].lower()
+
+                  if field == "received date/time" and value.split()[1] not in ("day", "days", "month", "months", "year", "years"):
+                        raise ValueError(f"{field} value is incorrect  -  {value}")
 
                   if field not in VALID_FIELDS_PREDICATE_MAP:
                         raise ValueError(f"field {field} is incorrect, please check the corresponding json file")

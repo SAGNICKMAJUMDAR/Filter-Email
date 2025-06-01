@@ -70,7 +70,6 @@ class AuthManager:
             raise ValueError(
                 "User already authenticated - Please reauthenticate if needed"
             )
-
         if self.email is not None and self.credential_path is None and not self.re_auth:
             token_details: UserToken = self.get_token(self.email)
             self.cred_details: Credentials = Credentials.from_authorized_user_info(

@@ -93,6 +93,8 @@ class EmailStorageService:
             EmailAddress.address, EmailAddress.id
         ).all()
         email_address_id_map = {address: id_ for address, id_ in result}
+        emails = self.db_session.query(Email.id, Email.message_id).all()
+        email_map:Dict[str, uuid.UUID] = {email.message_id: email.id for email in emails}
 
         for msg_obj in msg_list:
             msg_id, full_msg = next(iter(msg_obj.items()))
@@ -108,7 +110,7 @@ class EmailStorageService:
             internal_date:datetime = datetime.fromtimestamp(int(full_msg["internalDate"]) / 1000)
             received_date = parsedate_to_datetime(headers.get("Date"))
 
-            email_id: uuid = uuid.uuid4()
+            email_id: uuid = uuid.uuid4() if email_map.get(msg_id) is None else email_map[msg_id]
             email = {
                 "id": email_id,
                 "message_id": msg_id,
@@ -118,12 +120,11 @@ class EmailStorageService:
                 "internal_date": internal_date,
             }
             emails_to_add.append(email)
-
             self.form_db_data([sender_address], email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.SENDER)
             self.form_db_data(recipient_addresses, email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.RECIPIENT)
             self.form_db_data(cced_addresses, email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.CC)
             self.form_db_data(bcced_addresses, email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.BCC)
-            
+
         self.db_session.execute(
             insert(Email)
             .values(emails_to_add)

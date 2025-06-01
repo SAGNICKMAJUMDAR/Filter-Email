@@ -11,9 +11,20 @@ from sqlalchemy import (
     func
 )
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from auth_utility import role_map
 
 class QueryBuilder:
+
+    @staticmethod
+    def get_date_threshold(unit: str, number: int):
+        "Get threshold date in month and years"
+        
+        if unit in ("day", "days"):
+            return func.current_date() - timedelta(days=number)
+        if unit in ("month", "months"):
+            return datetime.now() - relativedelta(months=2)
+        return datetime.now() - relativedelta(years=2)
     
     def build_combined_query(self, session, rules):
 
@@ -55,16 +66,18 @@ class QueryBuilder:
                     conditions.append(column != value)
 
             elif field == "received date/time":
+                duration_value: int
+                duration_unit: str
                 column = Email.received_date
-                days = int(value)
+                duration_value, duration_unit = value.split()
                 if "less than" in predicate:
-                    conditions.append(column >= func.current_date() - timedelta(days=days))
+                    conditions.append(column >= self.get_date_threshold(duration_unit, int(duration_value)))
                 elif "greater than" in predicate:
-                    conditions.append(column < func.current_date() - timedelta(days=days))
+                    conditions.append(column < self.get_date_threshold(duration_unit, int(duration_value)))
                 elif "equals" in predicate:
                     conditions.append(func.date(column) == func.current_date())
         combiner = and_ if rules['predicate'].lower() == "all" else or_
         filter_conditions = combiner(*conditions)
 
-        combined_query = session.query(Email).filter(filter_conditions)
+        combined_query = session.query(Email).filter(filter_conditions).limit(1000)
         return combined_query
