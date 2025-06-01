@@ -4,8 +4,9 @@ import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from datetime import datetime
-from typing import TypedDict, List, Tuple
+from typing import TypedDict, List, Tuple, Dict
 from models import Email, EmailAddress, EmailParticipant, RoleEnum, UserToken
+from email.utils import parsedate_to_datetime
 
 
 class Header(TypedDict):
@@ -40,11 +41,41 @@ class EmailStorageService:
             return raw.split("<")[1].split(">")[0].strip()
         return raw.strip()
 
-    def extract_recipients(self, raw: str) -> List[str]:
+    def extract_email_info(self, raw: str) -> List[str]:
         "Extract Recepient Email Addresses"
         if not raw:
             return []
         return [self.extract_email(addr) for addr in raw.split(",")]
+    
+    @staticmethod
+    def form_db_data(
+        address_list:List,
+        email_id: uuid.UUID,
+        participants_to_add: List[str], 
+        addresses_to_add: List[str], 
+        email_address_id_map:Dict[str, uuid.UUID],
+        role: RoleEnum
+    ) -> None:
+        "Form Db data"
+
+        for addr in address_list:
+            address = addr.lower().strip()
+            if email_address_id_map.get(address) is None:
+                email_address_id_map[address] = uuid.uuid4()
+
+            addresses_to_add.append(
+                {
+                    "id": email_address_id_map[address],
+                    "address": address,
+                }
+            )
+            participants_to_add.append(
+                {
+                    "email_id": email_id,
+                    "email_address_id": email_address_id_map[address],
+                    "role": role,
+                }
+            )
 
     def store_emails_from_fetcher(self, msg_list: List[FullMessage]) -> None:
         """
@@ -69,10 +100,13 @@ class EmailStorageService:
                 header["name"]: header["value"]
                 for header in full_msg["payload"]["headers"]
             }
-            subject = headers.get("Subject")
-            sender_address = self.extract_email(headers.get("From", "")).lower().strip()
-            recipient_addresses = self.extract_recipients(headers.get("To", ""))
-            internal_date = datetime.fromtimestamp(int(full_msg["internalDate"]) / 1000)
+            subject:str = headers.get("Subject")
+            sender_address:str = self.extract_email(headers.get("From", "")).lower().strip()
+            recipient_addresses:List[str] = self.extract_email_info(headers.get("To", ""))
+            cced_addresses:List[str] = self.extract_email_info(headers.get("Cc", ""))
+            bcced_addresses:List[str] = self.extract_email_info(headers.get("Bcc", ""))
+            internal_date:datetime = datetime.fromtimestamp(int(full_msg["internalDate"]) / 1000)
+            received_date = parsedate_to_datetime(headers.get("Date"))
 
             email_id: uuid = uuid.uuid4()
             email = {
@@ -80,43 +114,16 @@ class EmailStorageService:
                 "message_id": msg_id,
                 "gmail_account_id": self.user_token["id"],
                 "subject": subject,
+                "received_date": received_date,
                 "internal_date": internal_date,
             }
             emails_to_add.append(email)
 
-            if email_address_id_map.get(sender_address) is None:
-                email_address_id_map[sender_address] = uuid.uuid4()
-
-            addresses_to_add.append(
-                {"id": email_address_id_map[sender_address], "address": sender_address}
-            )
-
-            participants_to_add.append(
-                {
-                    "email_id": email_id,
-                    "email_address_id": email_address_id_map[sender_address],
-                    "role": RoleEnum.sender,
-                }
-            )
-
-            for recipient_addr in recipient_addresses:
-                recipient_address = recipient_addr.lower().strip()
-                if email_address_id_map.get(recipient_address) is None:
-                    email_address_id_map[recipient_address] = uuid.uuid4()
-
-                addresses_to_add.append(
-                    {
-                        "id": email_address_id_map[recipient_address],
-                        "address": recipient_address,
-                    }
-                )
-                participants_to_add.append(
-                    {
-                        "email_id": email_id,
-                        "email_address_id": email_address_id_map[recipient_address],
-                        "role": RoleEnum.recipient,
-                    }
-                )
+            self.form_db_data([sender_address], email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.SENDER)
+            self.form_db_data(recipient_addresses, email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.RECIPIENT)
+            self.form_db_data(cced_addresses, email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.CC)
+            self.form_db_data(bcced_addresses, email_id, participants_to_add,  addresses_to_add, email_address_id_map, RoleEnum.BCC)
+            
         self.db_session.execute(
             insert(Email)
             .values(emails_to_add)
@@ -136,3 +143,4 @@ class EmailStorageService:
                 index_elements=["email_id", "email_address_id", "role"]
             )
         )
+        
