@@ -22,8 +22,15 @@ Base = declarative_base()
 
 
 class RoleEnum(IntEnum):
-    sender = 1
-    recipient = 2
+    SENDER = 1
+    RECIPIENT = 2
+    CC = 3
+    BCC = 4
+
+
+class EmailStatus(IntEnum):
+    ACTIVE = 1
+    DELETED = 0
 
 
 class IntEnumType(TypeDecorator):
@@ -71,6 +78,9 @@ class Email(Base, Serializer):
     subject = Column(String(255))
     received_date = Column(DateTime)
     internal_date = Column(DateTime)
+    status = Column(
+        IntEnumType(EmailStatus), default=EmailStatus.ACTIVE.value, nullable=False
+    )
 
     user_token = relationship("UserToken", backref="emails")
     participants = relationship(
@@ -93,7 +103,7 @@ class EmailAddress(Base, Serializer):
     participations = relationship("EmailParticipant", back_populates="email_address")
 
 
-class EmailParticipant(Base):
+class EmailParticipant(Base, Serializer):
     __tablename__ = "email_participants"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

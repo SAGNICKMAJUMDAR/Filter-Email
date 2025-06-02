@@ -3,9 +3,18 @@ import uuid
 
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import func, update
 from datetime import datetime
-from typing import TypedDict, List, Tuple
-from models import Email, EmailAddress, EmailParticipant, RoleEnum, UserToken
+from typing import TypedDict, List, Tuple, Dict, Optional, Any
+from models import (
+    Email,
+    EmailAddress,
+    EmailParticipant,
+    RoleEnum,
+    UserToken,
+    EmailStatus,
+)
+from email.utils import parsedate_to_datetime
 
 
 class Header(TypedDict):
@@ -28,11 +37,8 @@ class FullMessage(TypedDict, total=False):
 
 
 class EmailStorageService:
-    def __init__(self, db_session: Session, user_token: UserToken):
+    def __init__(self, db_session: Session):
         self.db_session = db_session
-        self.user_token = user_token
-        self._email_cache = {}
-        self._address_cache = {}
 
     def extract_email(self, raw: str) -> str:
         "Extract Sender Email Address"
@@ -40,13 +46,45 @@ class EmailStorageService:
             return raw.split("<")[1].split(">")[0].strip()
         return raw.strip()
 
-    def extract_recipients(self, raw: str) -> List[str]:
+    def extract_email_info(self, raw: str) -> List[str]:
         "Extract Recepient Email Addresses"
         if not raw:
             return []
         return [self.extract_email(addr) for addr in raw.split(",")]
 
-    def store_emails_from_fetcher(self, msg_list: List[FullMessage]) -> None:
+    @staticmethod
+    def form_db_data(
+        address_list: List,
+        email_id: uuid.UUID,
+        participants_to_add: List[str],
+        addresses_to_add: List[str],
+        email_address_id_map: Dict[str, uuid.UUID],
+        role: RoleEnum,
+    ) -> None:
+        "Form Db data"
+
+        for addr in address_list:
+            address = addr.lower().strip()
+            if email_address_id_map.get(address) is None:
+                email_address_id_map[address] = uuid.uuid4()
+
+            addresses_to_add.append(
+                {
+                    "id": email_address_id_map[address],
+                    "address": address,
+                }
+            )
+            participants_to_add.append(
+                {
+                    "email_id": email_id,
+                    "email_address_id": email_address_id_map[address],
+                    "role": role,
+                }
+            )
+
+    def store_emails_from_fetcher(
+        self, msg_list: List[FullMessage], user_token: UserToken
+    ) -> None:
         """
         Store emails fetched from gmail account
         1. Extract email address of sender.
@@ -62,6 +100,10 @@ class EmailStorageService:
             EmailAddress.address, EmailAddress.id
         ).all()
         email_address_id_map = {address: id_ for address, id_ in result}
+        emails = self.db_session.query(Email.id, Email.message_id).all()
+        email_map: Dict[str, uuid.UUID] = {
+            email.message_id: email.id for email in emails
+        }
 
         for msg_obj in msg_list:
             msg_id, full_msg = next(iter(msg_obj.items()))
@@ -69,54 +111,65 @@ class EmailStorageService:
                 header["name"]: header["value"]
                 for header in full_msg["payload"]["headers"]
             }
-            subject = headers.get("Subject")
-            sender_address = self.extract_email(headers.get("From", "")).lower().strip()
-            recipient_addresses = self.extract_recipients(headers.get("To", ""))
-            internal_date = datetime.fromtimestamp(int(full_msg["internalDate"]) / 1000)
+            subject: str = headers.get("Subject")
+            sender_address: str = (
+                self.extract_email(headers.get("From", "")).lower().strip()
+            )
+            recipient_addresses: List[str] = self.extract_email_info(
+                headers.get("To", "")
+            )
+            cced_addresses: List[str] = self.extract_email_info(headers.get("Cc", ""))
+            bcced_addresses: List[str] = self.extract_email_info(headers.get("Bcc", ""))
+            internal_date: datetime = datetime.fromtimestamp(
+                int(full_msg["internalDate"]) / 1000
+            )
+            received_date = parsedate_to_datetime(headers.get("Date"))
 
-            email_id: uuid = uuid.uuid4()
+            email_id: uuid = (
+                uuid.uuid4() if email_map.get(msg_id) is None else email_map[msg_id]
+            )
             email = {
                 "id": email_id,
                 "message_id": msg_id,
-                "gmail_account_id": self.user_token["id"],
+                "gmail_account_id": user_token["id"],
                 "subject": subject,
+                "received_date": received_date,
                 "internal_date": internal_date,
             }
             emails_to_add.append(email)
-
-            if email_address_id_map.get(sender_address) is None:
-                email_address_id_map[sender_address] = uuid.uuid4()
-
-            addresses_to_add.append(
-                {"id": email_address_id_map[sender_address], "address": sender_address}
+            self.form_db_data(
+                [sender_address],
+                email_id,
+                participants_to_add,
+                addresses_to_add,
+                email_address_id_map,
+                RoleEnum.SENDER,
+            )
+            self.form_db_data(
+                recipient_addresses,
+                email_id,
+                participants_to_add,
+                addresses_to_add,
+                email_address_id_map,
+                RoleEnum.RECIPIENT,
+            )
+            self.form_db_data(
+                cced_addresses,
+                email_id,
+                participants_to_add,
+                addresses_to_add,
+                email_address_id_map,
+                RoleEnum.CC,
+            )
+            self.form_db_data(
+                bcced_addresses,
+                email_id,
+                participants_to_add,
+                addresses_to_add,
+                email_address_id_map,
+                RoleEnum.BCC,
             )
 
-            participants_to_add.append(
-                {
-                    "email_id": email_id,
-                    "email_address_id": email_address_id_map[sender_address],
-                    "role": RoleEnum.sender,
-                }
-            )
-
-            for recipient_addr in recipient_addresses:
-                recipient_address = recipient_addr.lower().strip()
-                if email_address_id_map.get(recipient_address) is None:
-                    email_address_id_map[recipient_address] = uuid.uuid4()
-
-                addresses_to_add.append(
-                    {
-                        "id": email_address_id_map[recipient_address],
-                        "address": recipient_address,
-                    }
-                )
-                participants_to_add.append(
-                    {
-                        "email_id": email_id,
-                        "email_address_id": email_address_id_map[recipient_address],
-                        "role": RoleEnum.recipient,
-                    }
-                )
         self.db_session.execute(
             insert(Email)
             .values(emails_to_add)
@@ -135,4 +188,33 @@ class EmailStorageService:
             .on_conflict_do_nothing(
                 index_elements=["email_id", "email_address_id", "role"]
             )
+        )
+
+    def get_latest_internal_date(self, gmail_account_id) -> Optional[datetime]:
+        "Fetch internal date of the latest stored email"
+        return (
+            self.db_session.query(func.max(Email.internal_date))
+            .filter(Email.gmail_account_id == gmail_account_id)
+            .scalar()
+        )
+
+    def update_email_status(
+        self, message_ids: List[str], status: EmailStatus, gmail_account_id: uuid.UUID
+    ) -> None:
+        "update email status"
+        self.db_session.execute(
+            update(Email)
+            .where(
+                Email.message_id.in_(message_ids),
+                Email.gmail_account_id == gmail_account_id,
+            )
+            .values(status=status)
+        )
+
+    def fetched_stored_email(self, gmail_account_id) -> List[Email]:
+        "Fetch stored emails from db for a gmail account"
+        return (
+            self.db_session.query(Email)
+            .filter(Email.gmail_account_id == gmail_account_id)
+            .all()
         )
