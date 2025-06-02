@@ -52,6 +52,11 @@ def parse_args():
 def main():
     args = parse_args()
     arg_value_map = {key: value for key, value in vars(args).items()}
+    if arg_value_map["email"] is None and arg_value_map["credentials"] is None:
+        args.error("You must provide either --email or --credential_path")
+    if arg_value_map["email"] is not None and arg_value_map["credentials"] is None and arg_value_map["reauth"]:
+        args.error("You must provide both --credential_path when --reauth is True")
+    
     auth = AuthManager(
         email=arg_value_map["email"],
         credential_path=arg_value_map["credentials"],
