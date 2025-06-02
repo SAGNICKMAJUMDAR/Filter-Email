@@ -1,29 +1,31 @@
 from sqlalchemy import delete
 from email_fetcher_service import get_db_session
 from models import Email
+from worker import mark_email_status
+
 
 class Actions:
 
     class ActionMapper:
-          
+
         _action_mapper = {}
-           
+
         @classmethod
         def action_mapper(cls, action_name):
             def wrapper(fn):
                 cls._action_mapper[action_name] = fn
                 return fn
+
             return wrapper
-    
-    action_mapper_obj =  ActionMapper()
-    
+
+    action_mapper_obj = ActionMapper()
+
     def __init__(self, gmail_service):
         self.service = gmail_service
-    
-    def perform_batch(self, message_ids, actions) -> None:
 
+    def perform_batch(self, message_ids, actions, gmail_account_id) -> None:
         "Perform batch actions on fetched emails"
-    
+
         add_labels = []
         remove_labels = []
         delete_ids = []
@@ -32,28 +34,30 @@ class Actions:
             if action == "delete_permanent":
                 delete_ids.extend(message_ids)
             else:
-                self.action_mapper_obj._action_mapper[action](self, add_labels, remove_labels)
+                self.action_mapper_obj._action_mapper[action](
+                    self, add_labels, remove_labels
+                )
         if delete_ids:
             self.service.users().messages().batchDelete(
-                userId='me',
-                body={"ids": message_ids}
+                userId="me", body={"ids": message_ids}
             ).execute()
-            # NOTE: a task should be triggered to remove the emails in db
-            with get_db_session() as db_session:
-                db_session.execute(
-                    delete(Email).where(Email.message_id.in_(message_ids))
-                )
-        
+            mark_email_status.apply_async(args=[message_ids, gmail_account_id])
+
         if message_ids and add_labels or remove_labels:
-            a=self.service.users().messages().batchModify(
-                userId='me',
-                body={  
-                    'ids': message_ids,
-                    'addLabelIds': add_labels,
-                    'removeLabelIds': remove_labels
-                }
-            ).execute()
-    
+            a = (
+                self.service.users()
+                .messages()
+                .batchModify(
+                    userId="me",
+                    body={
+                        "ids": message_ids,
+                        "addLabelIds": add_labels,
+                        "removeLabelIds": remove_labels,
+                    },
+                )
+                .execute()
+            )
+
     @action_mapper_obj.action_mapper("mark_as_read")
     def mark_as_read(self, _add_labels, remove_labels):
         remove_labels.append("UNREAD")

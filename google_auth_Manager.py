@@ -1,11 +1,13 @@
+from uuid import UUID
 from models import UserToken
 from session_manager import get_db_session
+from resolver import ServiceManager
 
 from google_auth_store import AuthStore
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from typing import Dict, Any
+from typing import Dict, Any, Union
 
 from auth_utility import get_user_email
 
@@ -13,6 +15,7 @@ import json
 import os
 
 
+@ServiceManager.register("auth")
 class AuthManager:
 
     def __init__(
@@ -39,6 +42,14 @@ class AuthManager:
             user_token: Dict[str, Any] = AuthStore(session).get_token(email).to_dict()
         return user_token
 
+    def get_token_by_id(self, id: UUID) -> UserToken:
+        "Fetch token details for a user"
+        with get_db_session() as session:
+            user_token: Dict[str, Any] = (
+                AuthStore(session).get_token_by_id(id).to_dict()
+            )
+        return user_token
+
     def save_token(self) -> None:
         "Save newly created token details for a user"
         with get_db_session() as session:
@@ -53,7 +64,7 @@ class AuthManager:
                 self.email, self.credential_path, self.cred_details
             )
 
-    def authenticate(self):
+    def authenticate(self) -> Union[Credentials, str]:
         "Authenticate user email"
 
         if self.scope is None:
@@ -82,7 +93,7 @@ class AuthManager:
             ):
                 self.cred_details.refresh(Request())
                 self.update_token()
-                return self.cred_details
+            return self.cred_details, self.email
 
         if self.credential_path is not None and not os.path.exists(
             self.credential_path
@@ -101,4 +112,4 @@ class AuthManager:
         else:
             self.email = get_user_email(self.cred_details)
             self.save_token()
-        return self.cred_details
+        return self.cred_details, self.email

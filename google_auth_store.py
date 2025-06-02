@@ -1,4 +1,4 @@
-from sys import breakpointhook
+from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import update
@@ -16,6 +16,10 @@ class AuthStore:
     def get_token(self, email: str) -> UserToken:
         "Fetch token details"
         return self.db_session.query(UserToken).filter_by(email=email).first()
+
+    def get_token_by_id(self, account_id: UUID) -> UserToken:
+        "Fetch token details for a user"
+        return self.db_session.query(UserToken).filter_by(id=account_id).first()
 
     def save_token(
         self, email: str, credential_path: str, cred_details: Credentials

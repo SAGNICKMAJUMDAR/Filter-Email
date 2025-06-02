@@ -28,6 +28,11 @@ class RoleEnum(IntEnum):
     BCC = 4
 
 
+class EmailStatus(IntEnum):
+    ACTIVE = 1
+    DELETED = 0
+
+
 class IntEnumType(TypeDecorator):
     impl = Integer
 
@@ -73,6 +78,9 @@ class Email(Base, Serializer):
     subject = Column(String(255))
     received_date = Column(DateTime)
     internal_date = Column(DateTime)
+    status = Column(
+        IntEnumType(EmailStatus), default=EmailStatus.ACTIVE.value, nullable=False
+    )
 
     user_token = relationship("UserToken", backref="emails")
     participants = relationship(
