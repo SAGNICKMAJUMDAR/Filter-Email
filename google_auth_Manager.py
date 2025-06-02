@@ -66,13 +66,10 @@ class AuthManager:
 
     def authenticate(self) -> Union[Credentials, str]:
         "Authenticate user email"
-
+        
         if self.scope is None:
             raise ValueError("scope cannot be None")
-        if self.email is None and self.re_auth:
-            raise ValueError("Non Existent user cannot be reauthenticated")
-        if self.email is not None and self.credential_path is None and self.re_auth:
-            raise ValueError("User cannot be reauthenticated without credential file")
+        
         if (
             self.email is not None
             and self.credential_path is not None

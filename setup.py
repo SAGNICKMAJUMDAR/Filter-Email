@@ -1,5 +1,7 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text  # type: ignore
-from sqlalchemy.orm import sessionmaker  # type: ignore
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 from models import Base, UserToken
 import os
@@ -20,8 +22,24 @@ CELERY_BACKEND_URL = "db+" + DATABASE_URL
 engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 
+def create_postgres_database(db_name, user, password, host, port):
+
+    con = psycopg2.connect(dbname=db_name, user=user, password=password, host=host, port=port)
+    con.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+    cur = con.cursor()
+
+    cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
+    if not cur.fetchone():
+        cur.execute(f"CREATE DATABASE {db_name}")
+        print(f"Database '{db_name}' created.")
+    else:
+        print(f"Database '{db_name}' already exists.")
+
+    cur.close()
+    con.close()
 
 def init_db():
+    create_postgres_database(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
