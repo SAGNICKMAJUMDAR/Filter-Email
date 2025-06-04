@@ -34,7 +34,6 @@ app.conf.beat_schedule = {
     "mark-deleted-every-every-day": {
         "task": "fetch_deleted_emails_for_all_users",
         "schedule": crontab(hour=0, minute=0),
-        "schedule": crontab(minute="*/2"),
     },
     "remove-deleted-emails-every-day": {
         "task": "remove_deleted_emails",
